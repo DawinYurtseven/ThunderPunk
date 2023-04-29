@@ -5,9 +5,12 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
+  - enabled: 0
+    path: 
+    guid: 00000000000000000000000000000000
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/Scenes/ThunderPunk.unity
+    guid: 901237be402acfe49825539bf196fa39
   m_configObjects:
     com.unity.input.settings: {fileID: 11400000, guid: 465a25ad43cb4e945a97006018b9e575,
       type: 2}

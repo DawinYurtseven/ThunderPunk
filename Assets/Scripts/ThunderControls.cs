@@ -63,7 +63,8 @@ public class ThunderControls : MonoBehaviour
 
     #region Camera
 
-    [Header("Camera")] [SerializeField] private GameObject cameraPivot, lookAtPivot;
+    [Header("Camera")] [SerializeField] private GameObject cameraPivot;
+    [SerializeField] private GameObject lookAtPivot;
     [SerializeField] private Vector2 cameraDirection;
     [SerializeField] private float cameraSpeed;
 
@@ -90,7 +91,8 @@ public class ThunderControls : MonoBehaviour
 
     #region Jump
 
-    [Header("Jump")] [SerializeField] private float jumpStrength, fallStrength;
+    [Header("Jump")] [SerializeField] private float jumpStrength;
+    [SerializeField] private float fallStrength;
     [SerializeField] private bool doublejumped;
     [SerializeField] private float gravity;
 
@@ -99,14 +101,14 @@ public class ThunderControls : MonoBehaviour
         if (context.action.triggered && Physics.Raycast(transform.position, -transform.up, 1.1f))
         {
             doublejumped = false;
-            _rb.velocity += new Vector3(0f, jumpStrength, 0f);
+            _rb.velocity += transform.up * jumpStrength;
             //_rb.AddForce(-transform.up * 5f, ForceMode.Impulse);
             Debug.Log("got pressed");
         }
         else if (context.action.triggered && !doublejumped)
         {
             Debug.Log("Also got Pressed but with Pazaaaas");
-            _rb.velocity += new Vector3(0f, jumpStrength, 0f);
+            _rb.velocity += transform.up * jumpStrength;
             //_rb.AddForce(transform.up*jumpStrength, ForceMode.Impulse);
             doublejumped = true;
         }
@@ -121,17 +123,9 @@ public class ThunderControls : MonoBehaviour
 
     #endregion
 
-    #region Collision Handling
+    #region GroundRotation
 
-    public void OnCollisionEnter(Collision collisionInfo)
-    {
-        if (collisionInfo.gameObject.CompareTag("CurvedGround") && Physics.Raycast(lookAtPivot.transform.position,
-                -transform.up, out RaycastHit hit, 1.1f))
-        {
-            transform.rotation = Quaternion.FromToRotation(transform.up, hit.normal);
-            Debug.Log("corrected");
-        }
-    }
+    
 
     #endregion
 }
