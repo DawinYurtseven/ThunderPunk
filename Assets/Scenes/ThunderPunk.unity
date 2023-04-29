@@ -527,7 +527,7 @@ MonoBehaviour:
   cameraDirection: {x: 0, y: 0}
   cameraSpeed: 100
   jumpStrength: 25
-  fallStrength: 150
+  fallStrength: 200
   doublejumped: 0
 --- !u!54 &838266116
 Rigidbody:
