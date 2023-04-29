@@ -92,6 +92,7 @@ public class ThunderControls : MonoBehaviour
 
     [Header("Jump")] [SerializeField] private float jumpStrength, fallStrength;
     [SerializeField] private bool doublejumped;
+    [SerializeField] private float gravity;
 
     public void Jump(InputAction.CallbackContext context)
     {
@@ -113,6 +114,7 @@ public class ThunderControls : MonoBehaviour
 
     private void RegulateJump()
     {
+        _rb.AddForce(-transform.up * gravity);
         if(_rb.velocity.y != 0)
             _rb.AddForce(-transform.up * fallStrength);
     }
@@ -121,11 +123,13 @@ public class ThunderControls : MonoBehaviour
 
     #region Collision Handling
 
-    public void OnCollisionStay(Collision collisionInfo)
+    public void OnCollisionEnter(Collision collisionInfo)
     {
-        if (!collisionInfo.gameObject.CompareTag("Ground"))
+        if (collisionInfo.gameObject.CompareTag("CurvedGround") && Physics.Raycast(lookAtPivot.transform.position,
+                -transform.up, out RaycastHit hit, 1.1f))
         {
-            
+            transform.rotation = Quaternion.FromToRotation(transform.up, hit.normal);
+            Debug.Log("corrected");
         }
     }
 
