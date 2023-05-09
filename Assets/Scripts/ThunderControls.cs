@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -6,7 +7,11 @@ using UnityEngine.InputSystem;
 public class ThunderControls : MonoBehaviour
 {
     private Rigidbody _rb;
+    [SerializeField] private LayerMask ground;
 
+    [SerializeField] private AnimationCurve animCurve;
+
+    [SerializeField] private float timer;
 
     public void Awake()
     {
@@ -21,8 +26,8 @@ public class ThunderControls : MonoBehaviour
         CameraUpdate();
         //jumpControl
         RegulateJump();
-        
-        
+
+
         //test functions that will be removed after bug fixes
         DashIndication();
     }
@@ -39,7 +44,7 @@ public class ThunderControls : MonoBehaviour
         {
             var lastMoveVector = moveVector;
             moveVector = context.ReadValue<Vector2>();
-            currentSpeed -= ((lastMoveVector - moveVector).magnitude * currentSpeed/2) * 0.6f;
+            currentSpeed -= ((lastMoveVector - moveVector).magnitude * currentSpeed / 2) * 0.3f;
             //todo: let player slow down before changing direction drastically
         }
         else if (context.canceled)
@@ -56,20 +61,20 @@ public class ThunderControls : MonoBehaviour
             currentSpeed = velocity.magnitude;
             _rb.velocity = Vector3.Lerp(velocity, new Vector3(0, 0, 0), Time.fixedDeltaTime);
         }
-        else if(!dashedCooldown)
+        else if (!dashedCooldown)
         {
             var right = lookAtTarget.right;
             var forward = lookAtTarget.forward;
             lastInput = right * moveVector.x + forward * moveVector.y;
             var magnitude = lastInput.magnitude;
-            lastInput *= 1/magnitude;
+            lastInput *= 1 / magnitude;
             currentSpeed += Time.fixedDeltaTime * acceleration;
             currentSpeed = Mathf.Clamp(currentSpeed, 0, maxSpeed);
+            var localVelocity = _rb.transform.InverseTransformDirection(_rb.velocity);
             Vector3 relativeMove = right * (moveVector.x * currentSpeed) +
-                                   forward * (currentSpeed * moveVector.y) +
-                                   lookAtTarget.up * _rb.velocity.y;
+                                   forward * (currentSpeed * moveVector.y) 
+                                   + lookAtTarget.up * localVelocity.y;
             _rb.velocity = relativeMove;
-            
         }
     }
 
@@ -90,6 +95,7 @@ public class ThunderControls : MonoBehaviour
             cameraDirection = context.ReadValue<Vector2>();
         else if (context.canceled)
             cameraDirection = new Vector2(0, 0);
+        Debug.Log(cameraPivot.transform.localRotation);
     }
 
     private void CameraUpdate()
@@ -97,8 +103,8 @@ public class ThunderControls : MonoBehaviour
         _xAxisAngle += -cameraDirection.y * cameraSpeed * Time.fixedDeltaTime;
         _yAxisAngle += cameraDirection.x * cameraSpeed * Time.fixedDeltaTime;
         _xAxisAngle = Mathf.Clamp(_xAxisAngle, -15f, 65f);
-        cameraPivot.transform.rotation = Quaternion.Euler(_xAxisAngle, _yAxisAngle, 0f);
-        lookAtPivot.transform.rotation = Quaternion.Euler(0f, _yAxisAngle, 0f);
+        cameraPivot.transform.localRotation = Quaternion.Euler(_xAxisAngle, _yAxisAngle, transform.localRotation.z);
+        lookAtPivot.transform.localRotation = Quaternion.Euler(0f, _yAxisAngle, transform.localRotation.z);
     }
 
     #endregion
@@ -132,15 +138,13 @@ public class ThunderControls : MonoBehaviour
     private void RegulateJump()
     {
         _rb.AddForce(-transform.up * gravity);
-        if(_rb.velocity.y != 0)
+        if (_rb.velocity.y != 0)
             _rb.AddForce(-transform.up * fallStrength);
     }
 
     #endregion
 
     #region GroundRotation
-
-    
 
     #endregion
 
@@ -149,8 +153,8 @@ public class ThunderControls : MonoBehaviour
     [Header("Dash")] [SerializeField] private float dashSpeed;
     [SerializeField] private Vector3 lastInput;
     [SerializeField] private bool dashed, dashedCooldown;
-    
-    
+
+
     //todo: remove debugStuff after finishing system and bugfixes
     [SerializeField] private GameObject dashIndicator;
 
@@ -169,18 +173,18 @@ public class ThunderControls : MonoBehaviour
             //uses same logic as in Speed region to move person
             Vector3 relativeDash = lastInput * dashSpeed;
             _rb.velocity = relativeDash;
-            
+
             //dash adds speed to current speed
             currentSpeed += maxSpeed * 0.8f;
             currentSpeed = Mathf.Clamp(currentSpeed, 0, maxSpeed);
-            
+
             StartCoroutine(DashCooldown());
         }
     }
 
     private void DashIndication()
     {
-        var position = new Vector3( lastInput.x , 0,  lastInput.z) + lookAtPivot.transform.position;
+        var position = new Vector3(lastInput.x, 0, lastInput.z) + lookAtPivot.transform.position;
         dashIndicator.transform.position = position;
     }
 
@@ -192,4 +196,21 @@ public class ThunderControls : MonoBehaviour
     }
 
     #endregion
+
+    public void OnCollisionStay(Collision collisionInfo)
+    {
+        if (collisionInfo.gameObject.CompareTag("CurvedGround"))
+        {
+            Ray ray = new Ray(transform.position, -transform.up);
+            RaycastHit hit = new RaycastHit();
+            Quaternion RotationRef = Quaternion.Euler(0,0,0);
+            if (Physics.Raycast(ray, out hit, ground))
+            {
+                RotationRef = Quaternion.Lerp(transform.rotation,Quaternion.FromToRotation(Vector3.up,
+                                    hit.normal), animCurve.Evaluate(timer));
+                transform.localRotation = Quaternion.Euler(RotationRef.eulerAngles.x, RotationRef.eulerAngles.y,
+                    RotationRef.eulerAngles.z);
+            }
+        }
+    }
 }
