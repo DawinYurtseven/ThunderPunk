@@ -1,5 +1,5 @@
-using System;
 using System.Collections;
+using Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -37,14 +37,15 @@ public class ThunderControls : MonoBehaviour
     [Header("Movement")] [SerializeField] private Vector2 moveVector;
     [SerializeField] private float maxSpeed, acceleration, currentSpeed;
     [SerializeField] private Transform lookAtTarget;
-
+    
+    
     public void Move_2D(InputAction.CallbackContext context)
     {
         if (context.performed)
         {
             var lastMoveVector = moveVector;
             moveVector = context.ReadValue<Vector2>();
-            currentSpeed -= ((lastMoveVector - moveVector).magnitude * currentSpeed / 2) * 0.3f;
+            currentSpeed -= ((lastMoveVector - moveVector).magnitude * currentSpeed / 2) * 0.5f;
             //todo: let player slow down before changing direction drastically
         }
         else if (context.canceled)
@@ -69,7 +70,8 @@ public class ThunderControls : MonoBehaviour
             var magnitude = lastInput.magnitude;
             lastInput *= 1 / magnitude;
             currentSpeed += Time.fixedDeltaTime * acceleration;
-            currentSpeed = Mathf.Clamp(currentSpeed, 0, maxSpeed);
+            currentSpeed = Mathf.Clamp(currentSpeed, 0, _isHoldingShotLock ? 10f : maxSpeed);
+
             var localVelocity = _rb.transform.InverseTransformDirection(_rb.velocity);
             Vector3 relativeMove = right * (moveVector.x * currentSpeed) +
                                    forward * (currentSpeed * moveVector.y) 
@@ -95,16 +97,16 @@ public class ThunderControls : MonoBehaviour
             cameraDirection = context.ReadValue<Vector2>();
         else if (context.canceled)
             cameraDirection = new Vector2(0, 0);
-        Debug.Log(cameraPivot.transform.localRotation);
     }
 
     private void CameraUpdate()
     {
         _xAxisAngle += -cameraDirection.y * cameraSpeed * Time.fixedDeltaTime;
         _yAxisAngle += cameraDirection.x * cameraSpeed * Time.fixedDeltaTime;
-        _xAxisAngle = Mathf.Clamp(_xAxisAngle, -15f, 65f);
-        cameraPivot.transform.localRotation = Quaternion.Euler(_xAxisAngle, _yAxisAngle, transform.localRotation.z);
-        lookAtPivot.transform.localRotation = Quaternion.Euler(0f, _yAxisAngle, transform.localRotation.z);
+        _xAxisAngle = Mathf.Clamp(_xAxisAngle, _isHoldingShotLock ? -20f : -15f, 65f);
+
+        cameraPivot.transform.localRotation = Quaternion.Euler(_xAxisAngle, _yAxisAngle, 0f);
+        lookAtPivot.transform.localRotation = Quaternion.Euler(0f, _yAxisAngle, 0f);
     }
 
     #endregion
@@ -122,15 +124,12 @@ public class ThunderControls : MonoBehaviour
         {
             dashed = false;
             doublejumped = false;
-            _rb.velocity += transform.up * jumpStrength;
-            //_rb.AddForce(-transform.up * 5f, ForceMode.Impulse);
-            Debug.Log("got pressed");
+            var up = transform.up;
+            _rb.velocity += up * jumpStrength;
         }
         else if (context.action.triggered && !doublejumped)
         {
-            Debug.Log("Also got Pressed but with Pazaaaas");
             _rb.velocity += transform.up * jumpStrength;
-            //_rb.AddForce(transform.up*jumpStrength, ForceMode.Impulse);
             doublejumped = true;
         }
     }
@@ -143,11 +142,7 @@ public class ThunderControls : MonoBehaviour
     }
 
     #endregion
-
-    #region GroundRotation
-
-    #endregion
-
+    
     #region Dash
 
     [Header("Dash")] [SerializeField] private float dashSpeed;
@@ -169,7 +164,6 @@ public class ThunderControls : MonoBehaviour
 
             if (dashedCooldown || dashed) return;
             dashed = true;
-            Debug.Log("pressed  " + lastInput);
             //uses same logic as in Speed region to move person
             Vector3 relativeDash = lastInput * dashSpeed;
             _rb.velocity = relativeDash;
@@ -186,9 +180,10 @@ public class ThunderControls : MonoBehaviour
     {
         var position = new Vector3(lastInput.x, 0, lastInput.z) + lookAtPivot.transform.position;
         dashIndicator.transform.position = position;
+
     }
 
-    public IEnumerator DashCooldown()
+    private IEnumerator DashCooldown()
     {
         dashedCooldown = true;
         yield return new WaitForSeconds(0.5f);
@@ -197,20 +192,91 @@ public class ThunderControls : MonoBehaviour
 
     #endregion
 
+    #region Target System
+
+    [SerializeField] private int maxDistance;
+    [SerializeField] private Collider range;
+    [SerializeField] private new CinemachineVirtualCamera camera;
+    [SerializeField] private float cameraZoomSpeed;
+
+    private bool _isHoldingShotLock;
+
+    public void ShotLockInput(InputAction.CallbackContext context)
+    {
+        /*
+         * Todo: create collider and shape it inside ShotLockInput
+         * Todo: create list and objects to be listed
+         * Todo: create movement and options for it
+         * Todo: create UI
+         */
+        
+        if (context.performed)
+        {
+            _isHoldingShotLock = true;
+            StartCoroutine(LerpActionShotLockInput(30f, new Vector3(2, 2, 0),0f));
+        }
+
+        if (context.canceled)
+        {
+            _isHoldingShotLock = false;
+            StartCoroutine(LerpActionShotLockInput(60f, new Vector3(0, 0, 0),2.5f));
+        }
+    }
+
+    private IEnumerator LerpActionShotLockInput(float newFOV, Vector3 newOffset, float newVAL)
+    {
+        bool firstState = _isHoldingShotLock;
+        float lerpTimer = 0f;
+        while (lerpTimer < cameraZoomSpeed)
+        {
+            var fov = camera.m_Lens.FieldOfView;
+            var lerpFloat = Mathf.Lerp(fov, newFOV, lerpTimer); 
+            camera.m_Lens.FieldOfView = lerpFloat;
+            
+            if(!firstState.Equals(_isHoldingShotLock)) yield break;
+
+            var cine3rdPerson = camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>();
+            
+            var offset = cine3rdPerson.ShoulderOffset; 
+            var lerpVector= Vector3.Lerp(offset, newOffset, lerpTimer); 
+            camera.GetComponentInChildren<Cinemachine3rdPersonFollow>().ShoulderOffset = lerpVector;
+
+            var vertArmLength = cine3rdPerson.VerticalArmLength;
+            var lerpLength = Mathf.Lerp(vertArmLength, newVAL, lerpTimer);
+            camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>().VerticalArmLength = lerpLength;
+
+            lerpTimer += Time.fixedDeltaTime;
+            yield return null;
+        }
+        
+        camera.m_Lens.FieldOfView = newFOV;
+        camera.GetComponentInChildren<Cinemachine3rdPersonFollow>().ShoulderOffset = newOffset;
+    }
+    
+
+    #endregion
+    
     public void OnCollisionStay(Collision collisionInfo)
     {
         if (collisionInfo.gameObject.CompareTag("CurvedGround"))
         {
-            Ray ray = new Ray(transform.position, -transform.up);
-            RaycastHit hit = new RaycastHit();
-            Quaternion RotationRef = Quaternion.Euler(0,0,0);
-            if (Physics.Raycast(ray, out hit, ground))
+            var transform1 = transform;
+            Ray ray = new Ray(transform1.position, -transform1.up);
+            if (Physics.Raycast(ray, out var hit, ground))
             {
-                RotationRef = Quaternion.Lerp(transform.rotation,Quaternion.FromToRotation(Vector3.up,
-                                    hit.normal), animCurve.Evaluate(timer));
-                transform.localRotation = Quaternion.Euler(RotationRef.eulerAngles.x, RotationRef.eulerAngles.y,
-                    RotationRef.eulerAngles.z);
+                var rotationRef =  Quaternion.Lerp(transform.rotation,Quaternion.FromToRotation(Vector3.up,
+                    hit.normal), animCurve.Evaluate(timer));
+                transform.localRotation = Quaternion.Euler(rotationRef.eulerAngles.x, rotationRef.eulerAngles.y,
+                    rotationRef.eulerAngles.z);
             }
+        }
+        else if (collisionInfo.gameObject.CompareTag("Ground"))
+        {
+            var transform1 = transform;
+            var reference = Quaternion.Lerp(transform1.rotation, Quaternion.FromToRotation(
+                transform1.up, Vector3.up), animCurve.Evaluate(timer));
+            transform.localRotation = Quaternion.Euler(reference.eulerAngles.x,reference.eulerAngles.y,
+                reference.eulerAngles.z);
         }
     }
 }
