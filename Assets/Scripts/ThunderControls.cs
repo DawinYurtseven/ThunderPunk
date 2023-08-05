@@ -58,7 +58,7 @@ public class ThunderControls : MonoBehaviour
             currentSpeed = velocity.magnitude;
             _rb.velocity = Vector3.Lerp(velocity, new Vector3(0, 0, 0), Time.fixedDeltaTime);
         }
-        else if (!dashedCooldown)
+        else if (!dashedCooldown && !grinding)
         {
             var right = lookAtTarget.right;
             var forward = lookAtTarget.forward;
@@ -78,6 +78,32 @@ public class ThunderControls : MonoBehaviour
                                    + lookAtTarget.up * localVelocity.y;
             _rb.velocity = relativeMove;
         }
+    }
+
+    private bool grinding;
+
+    [SerializeField] private float grindSpeed;
+
+    public void SetGrind(BezierSplines spline)
+    {
+        StartCoroutine(Grinding(spline));
+    }
+
+    private IEnumerator Grinding(BezierSplines spline)
+    {
+        grinding = true;
+        timer = 0.0f;
+        while (timer <= spline.CurveCount / grindSpeed)
+        {
+            var t = timer * grindSpeed / spline.CurveCount;
+            var pos = spline.GetPoint(t);
+            transform.localPosition = pos;
+            transform.LookAt(pos + spline.GetDirections(t));
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        grinding = false;
     }
 
     #endregion
