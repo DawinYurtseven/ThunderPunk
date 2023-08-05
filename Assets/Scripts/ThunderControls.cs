@@ -26,19 +26,15 @@ public class ThunderControls : MonoBehaviour
         CameraUpdate();
         //jumpControl
         RegulateJump();
-
-
-        //test functions that will be removed after bug fixes
-        DashIndication();
     }
 
     #region Speed
 
     [Header("Movement")] [SerializeField] private Vector2 moveVector;
-    [SerializeField] private float maxSpeed, acceleration, currentSpeed;
+    [SerializeField] private float maxSpeed, acceleration, currentSpeed, shotLockLimit;
     [SerializeField] private Transform lookAtTarget;
-    
-    
+
+    //TODO: affect Direction change in air
     public void Move_2D(InputAction.CallbackContext context)
     {
         if (context.performed)
@@ -62,7 +58,7 @@ public class ThunderControls : MonoBehaviour
             currentSpeed = velocity.magnitude;
             _rb.velocity = Vector3.Lerp(velocity, new Vector3(0, 0, 0), Time.fixedDeltaTime);
         }
-        else if (!dashedCooldown)
+        else if (!dashedCooldown && !grinding)
         {
             var right = lookAtTarget.right;
             var forward = lookAtTarget.forward;
@@ -70,14 +66,44 @@ public class ThunderControls : MonoBehaviour
             var magnitude = lastInput.magnitude;
             lastInput *= 1 / magnitude;
             currentSpeed += Time.fixedDeltaTime * acceleration;
-            currentSpeed = Mathf.Clamp(currentSpeed, 0, _isHoldingShotLock ? 10f : maxSpeed);
+
+            //reduces movement limit during shot lock over time so player won't instantly stop at place
+            shotLockLimit = _isHoldingShotLock ? Mathf.Lerp(shotLockLimit, 10f, Time.fixedDeltaTime) : maxSpeed;
+
+            currentSpeed = Mathf.Clamp(currentSpeed, 0, _isHoldingShotLock ? shotLockLimit : maxSpeed);
 
             var localVelocity = _rb.transform.InverseTransformDirection(_rb.velocity);
             Vector3 relativeMove = right * (moveVector.x * currentSpeed) +
-                                   forward * (currentSpeed * moveVector.y) 
+                                   forward * (currentSpeed * moveVector.y)
                                    + lookAtTarget.up * localVelocity.y;
             _rb.velocity = relativeMove;
         }
+    }
+
+    private bool grinding;
+
+    [SerializeField] private float grindSpeed;
+
+    public void SetGrind(BezierSplines spline)
+    {
+        StartCoroutine(Grinding(spline));
+    }
+
+    private IEnumerator Grinding(BezierSplines spline)
+    {
+        grinding = true;
+        timer = 0.0f;
+        while (timer <= spline.CurveCount / grindSpeed)
+        {
+            var t = timer * grindSpeed / spline.CurveCount;
+            var pos = spline.GetPoint(t);
+            transform.localPosition = pos;
+            transform.LookAt(pos + spline.GetDirections(t));
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        grinding = false;
     }
 
     #endregion
@@ -118,6 +144,7 @@ public class ThunderControls : MonoBehaviour
     [SerializeField] private bool doublejumped;
     [SerializeField] private float gravity;
 
+
     public void Jump(InputAction.CallbackContext context)
     {
         if (context.action.triggered && Physics.Raycast(transform.position, -transform.up, 1.1f))
@@ -142,7 +169,7 @@ public class ThunderControls : MonoBehaviour
     }
 
     #endregion
-    
+
     #region Dash
 
     [Header("Dash")] [SerializeField] private float dashSpeed;
@@ -150,13 +177,10 @@ public class ThunderControls : MonoBehaviour
     [SerializeField] private bool dashed, dashedCooldown;
 
 
-    //todo: remove debugStuff after finishing system and bugfixes
-    [SerializeField] private GameObject dashIndicator;
-
-
     //this function will use the moveVector from the Speed region 
     public void Dash(InputAction.CallbackContext context)
     {
+        if (_isHoldingShotLock) return;
         if (context.started)
         {
             if (Physics.Raycast(transform.position, -transform.up, 1.1f))
@@ -174,13 +198,6 @@ public class ThunderControls : MonoBehaviour
 
             StartCoroutine(DashCooldown());
         }
-    }
-
-    private void DashIndication()
-    {
-        var position = new Vector3(lastInput.x, 0, lastInput.z) + lookAtPivot.transform.position;
-        dashIndicator.transform.position = position;
-
     }
 
     private IEnumerator DashCooldown()
@@ -209,62 +226,66 @@ public class ThunderControls : MonoBehaviour
          * Todo: create movement and options for it
          * Todo: create UI
          */
-        
+
         if (context.performed)
         {
             _isHoldingShotLock = true;
-            StartCoroutine(LerpActionShotLockInput(30f, new Vector3(2, 2, 0),0f));
+            StartCoroutine(LerpActionShotLockInput(30f, new Vector3(2, 2, 0), 0f));
         }
 
         if (context.canceled)
         {
             _isHoldingShotLock = false;
-            StartCoroutine(LerpActionShotLockInput(60f, new Vector3(0, 0, 0),2.5f));
+            StartCoroutine(LerpActionShotLockInput(60f, new Vector3(0, 0, 0), 2.5f));
         }
     }
 
-    private IEnumerator LerpActionShotLockInput(float newFOV, Vector3 newOffset, float newVAL)
+    private IEnumerator LerpActionShotLockInput(float newFOV, Vector3 newOffset, float newVal)
     {
         bool firstState = _isHoldingShotLock;
         float lerpTimer = 0f;
         while (lerpTimer < cameraZoomSpeed)
         {
             var fov = camera.m_Lens.FieldOfView;
-            var lerpFloat = Mathf.Lerp(fov, newFOV, lerpTimer); 
+            var lerpFloat = Mathf.Lerp(fov, newFOV, lerpTimer);
             camera.m_Lens.FieldOfView = lerpFloat;
-            
-            if(!firstState.Equals(_isHoldingShotLock)) yield break;
 
-            var cine3rdPerson = camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>();
-            
-            var offset = cine3rdPerson.ShoulderOffset; 
-            var lerpVector= Vector3.Lerp(offset, newOffset, lerpTimer); 
+            if (!firstState.Equals(_isHoldingShotLock)) yield break;
+
+            var cine3RdPerson = camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>();
+
+            var offset = cine3RdPerson.ShoulderOffset;
+            var lerpVector = Vector3.Lerp(offset, newOffset, lerpTimer);
             camera.GetComponentInChildren<Cinemachine3rdPersonFollow>().ShoulderOffset = lerpVector;
 
-            var vertArmLength = cine3rdPerson.VerticalArmLength;
-            var lerpLength = Mathf.Lerp(vertArmLength, newVAL, lerpTimer);
+            var vertArmLength = cine3RdPerson.VerticalArmLength;
+            var lerpLength = Mathf.Lerp(vertArmLength, newVal, lerpTimer);
             camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>().VerticalArmLength = lerpLength;
 
             lerpTimer += Time.fixedDeltaTime;
             yield return null;
         }
-        
+
         camera.m_Lens.FieldOfView = newFOV;
         camera.GetComponentInChildren<Cinemachine3rdPersonFollow>().ShoulderOffset = newOffset;
     }
-    
 
     #endregion
-    
+
+    #region Position and Rotation
+
+    private bool _isOnCurvedGround;
+
     public void OnCollisionStay(Collision collisionInfo)
     {
         if (collisionInfo.gameObject.CompareTag("CurvedGround"))
         {
+            _isOnCurvedGround = true;
             var transform1 = transform;
             Ray ray = new Ray(transform1.position, -transform1.up);
             if (Physics.Raycast(ray, out var hit, ground))
             {
-                var rotationRef =  Quaternion.Lerp(transform.rotation,Quaternion.FromToRotation(Vector3.up,
+                var rotationRef = Quaternion.Lerp(transform.rotation, Quaternion.FromToRotation(Vector3.up,
                     hit.normal), animCurve.Evaluate(timer));
                 transform.localRotation = Quaternion.Euler(rotationRef.eulerAngles.x, rotationRef.eulerAngles.y,
                     rotationRef.eulerAngles.z);
@@ -272,11 +293,39 @@ public class ThunderControls : MonoBehaviour
         }
         else if (collisionInfo.gameObject.CompareTag("Ground"))
         {
+            _isOnCurvedGround = false;
             var transform1 = transform;
-            var reference = Quaternion.Lerp(transform1.rotation, Quaternion.FromToRotation(
-                transform1.up, Vector3.up), animCurve.Evaluate(timer));
-            transform.localRotation = Quaternion.Euler(reference.eulerAngles.x,reference.eulerAngles.y,
+            var reference = Quaternion.Lerp(transform1.rotation, Quaternion.Euler(0, 0, 0),
+                animCurve.Evaluate(timer));
+            transform.localRotation = Quaternion.Euler(reference.eulerAngles.x, reference.eulerAngles.y,
                 reference.eulerAngles.z);
         }
     }
+
+    public void OnCollisionExit(Collision other)
+    {
+        if (other.gameObject.CompareTag("CurvedGround"))
+        {
+            _isOnCurvedGround = false;
+            StartCoroutine(ReturnRotation());
+        }
+    }
+
+    private IEnumerator ReturnRotation()
+    {
+        yield return new WaitForSeconds(2f);
+
+        while (!transform.rotation.Equals(Quaternion.Euler(0, 0, 0)))
+        {
+            if (_isOnCurvedGround) yield break;
+                var transform1 = transform;
+            var reference = Quaternion.Lerp(transform1.rotation, Quaternion.Euler(0, 0, 0),
+                animCurve.Evaluate(timer));
+            transform.localRotation = Quaternion.Euler(reference.eulerAngles.x, reference.eulerAngles.y,
+                reference.eulerAngles.z);
+            yield return null;
+        }
+    }
+
+    #endregion
 }
