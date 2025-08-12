@@ -2,11 +2,12 @@ using System.Collections;
 using Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Splines;
 
 [RequireComponent(typeof(Rigidbody))]
 public class ThunderControls : MonoBehaviour
 {
-    private Rigidbody _rb;
+    private Rigidbody rb;
     [SerializeField] private LayerMask ground;
 
     [SerializeField] private AnimationCurve animCurve;
@@ -15,7 +16,7 @@ public class ThunderControls : MonoBehaviour
 
     public void Awake()
     {
-        _rb = GetComponent<Rigidbody>();
+        rb = GetComponent<Rigidbody>();
     }
 
     public void FixedUpdate()
@@ -34,29 +35,69 @@ public class ThunderControls : MonoBehaviour
     [SerializeField] private float maxSpeed, acceleration, currentSpeed, shotLockLimit;
     [SerializeField] private Transform lookAtTarget;
 
-    //TODO: affect Direction change in air
+    private bool restricted;
+    
     public void Move_2D(InputAction.CallbackContext context)
     {
-        if (context.performed)
+        if (context.performed && !restricted)
         {
-            var lastMoveVector = moveVector;
+            StopCoroutine(BufferMoveVector(new Vector2(0,0)));
+            var nextMoveVector = context.ReadValue<Vector2>();
+            if (Mathf.Abs(Vector2.Angle(moveVector, nextMoveVector)) > 30f && currentSpeed > maxSpeed*4/5)
+            {
+                Debug.Log($"Slowing with angle {Vector2.Angle(moveVector, nextMoveVector)}");
+                StartCoroutine(SlowDown(0.5f));
+                Debug.Log("NOW!!!");
+            }
             moveVector = context.ReadValue<Vector2>();
-            currentSpeed -= ((lastMoveVector - moveVector).magnitude * currentSpeed / 2) * 0.5f;
-            //todo: let player slow down before changing direction drastically
         }
         else if (context.canceled)
         {
-            moveVector = new Vector2(0, 0);
+            StartCoroutine(BufferMoveVector(new Vector2(0,0)));
         }
+    }
+
+    private IEnumerator BufferMoveVector(Vector2 nextMoveVector)
+    {
+        yield return new WaitForSeconds(0.5f);
+        moveVector = nextMoveVector;
+    }
+
+    private IEnumerator SlowDown(float duration)
+    {
+        restricted = true;
+        var saveCurrentSpeed = currentSpeed;
+        float fixedTimer = 0;
+        while (fixedTimer<= duration)
+        {
+            currentSpeed -= Time.fixedDeltaTime * saveCurrentSpeed / duration;
+            fixedTimer += Time.fixedDeltaTime;
+            yield return null;
+        }
+        restricted = false;
+        currentSpeed = saveCurrentSpeed;
+    }
+
+    private IEnumerator RestrictMovement(float duration)
+    {
+        restricted = true;
+        Debug.Log($"{restricted}");
+        yield return new WaitForSeconds(duration);
+        Debug.Log($"{restricted}");
+        restricted = false;
     }
 
     private void MovementUpdate()
     {
-        if (moveVector == Vector2.zero)
+        if (restricted)
         {
-            var velocity = _rb.velocity;
+            currentSpeed = rb.velocity.magnitude;
+        }
+        else if (moveVector == Vector2.zero)
+        {
+            var velocity = rb.velocity;
             currentSpeed = velocity.magnitude;
-            _rb.velocity = Vector3.Lerp(velocity, new Vector3(0, 0, 0), Time.fixedDeltaTime);
+            rb.velocity = Vector3.Lerp(velocity, new Vector3(0, 0, 0), Time.fixedDeltaTime);
         }
         else if (!dashedCooldown && !grinding)
         {
@@ -68,15 +109,22 @@ public class ThunderControls : MonoBehaviour
             currentSpeed += Time.fixedDeltaTime * acceleration;
 
             //reduces movement limit during shot lock over time so player won't instantly stop at place
-            shotLockLimit = _isHoldingShotLock ? Mathf.Lerp(shotLockLimit, 10f, Time.fixedDeltaTime) : maxSpeed;
+            shotLockLimit = isHoldingShotLock ? Mathf.Lerp(shotLockLimit, 10f, Time.fixedDeltaTime) : maxSpeed;
 
-            currentSpeed = Mathf.Clamp(currentSpeed, 0, _isHoldingShotLock ? shotLockLimit : maxSpeed);
+            currentSpeed = Mathf.Clamp(currentSpeed, 0, isHoldingShotLock ? shotLockLimit : maxSpeed);
 
-            var localVelocity = _rb.transform.InverseTransformDirection(_rb.velocity);
+            var localVelocity = rb.transform.InverseTransformDirection(rb.velocity);
+            
+            //wall running in the sense of moving along the wall
+            if (againstWall)
+            {
+                
+            }
+            
             Vector3 relativeMove = right * (moveVector.x * currentSpeed) +
                                    forward * (currentSpeed * moveVector.y)
                                    + lookAtTarget.up * localVelocity.y;
-            _rb.velocity = relativeMove;
+            rb.velocity = relativeMove;
         }
     }
 
@@ -84,26 +132,12 @@ public class ThunderControls : MonoBehaviour
 
     [SerializeField] private float grindSpeed;
 
-    public void SetGrind(BezierSplines spline)
-    {
-        StartCoroutine(Grinding(spline));
-    }
-
-    private IEnumerator Grinding(BezierSplines spline)
+   
+    private void Grinding(Spline spline, Vector3 position)
     {
         grinding = true;
-        timer = 0.0f;
-        while (timer <= spline.CurveCount / grindSpeed)
-        {
-            var t = timer * grindSpeed / spline.CurveCount;
-            var pos = spline.GetPoint(t);
-            transform.localPosition = pos;
-            transform.LookAt(pos + spline.GetDirections(t));
-            timer += Time.deltaTime;
-            yield return null;
-        }
-
-        grinding = false;
+        
+        //figure out how to get the 
     }
 
     #endregion
@@ -115,7 +149,7 @@ public class ThunderControls : MonoBehaviour
     [SerializeField] private Vector2 cameraDirection;
     [SerializeField] private float cameraSpeed;
 
-    private float _xAxisAngle, _yAxisAngle;
+    private float xAxisAngle, yAxisAngle;
 
     public void Camera_Move(InputAction.CallbackContext context)
     {
@@ -127,45 +161,55 @@ public class ThunderControls : MonoBehaviour
 
     private void CameraUpdate()
     {
-        _xAxisAngle += -cameraDirection.y * cameraSpeed * Time.fixedDeltaTime;
-        _yAxisAngle += cameraDirection.x * cameraSpeed * Time.fixedDeltaTime;
-        _xAxisAngle = Mathf.Clamp(_xAxisAngle, _isHoldingShotLock ? -20f : -15f, 65f);
+        xAxisAngle += -cameraDirection.y * cameraSpeed * Time.fixedDeltaTime;
+        yAxisAngle += cameraDirection.x * cameraSpeed * Time.fixedDeltaTime;
+        xAxisAngle = Mathf.Clamp(xAxisAngle, isHoldingShotLock ? -20f : -15f, 65f);
 
-        cameraPivot.transform.localRotation = Quaternion.Euler(_xAxisAngle, _yAxisAngle, 0f);
-        lookAtPivot.transform.localRotation = Quaternion.Euler(0f, _yAxisAngle, 0f);
+        cameraPivot.transform.localRotation = Quaternion.Euler(xAxisAngle, yAxisAngle, 0f);
+        lookAtPivot.transform.localRotation = Quaternion.Euler(0f, yAxisAngle, 0f);
     }
 
     #endregion
 
     #region Jump
 
-    [Header("Jump")] [SerializeField] private float jumpStrength;
-    [SerializeField] private float fallStrength;
-    [SerializeField] private bool doublejumped;
+    [Header("Jump")] 
+    [SerializeField] private float jumpStrength;
     [SerializeField] private float gravity;
+    
+    private bool doublejumped;
+    private bool againstWall;
 
 
     public void Jump(InputAction.CallbackContext context)
     {
-        if (context.action.triggered && Physics.Raycast(transform.position, -transform.up, 1.1f))
+        if (context.action.triggered && againstWall)
         {
-            dashed = false;
+            StartCoroutine(RestrictMovement(1f));
+            rb.velocity += Vector3.Normalize(wallNormal + transform.up) * jumpStrength * 2;
+            doublejumped = true;
+        }
+        else if (context.action.triggered && Physics.Raycast(transform.position, -transform.up, 1.1f))
+        {
             doublejumped = false;
             var up = transform.up;
-            _rb.velocity += up * jumpStrength;
+            var dif = 0 - rb.velocity.y;
+            if(dif > 0)
+                up *= 2.5f *  jumpStrength;
+            else
+                up *= jumpStrength;
+            rb.velocity += up;
         }
         else if (context.action.triggered && !doublejumped)
         {
-            _rb.velocity += transform.up * jumpStrength;
+            rb.velocity += transform.up * jumpStrength;
             doublejumped = true;
         }
     }
 
     private void RegulateJump()
     {
-        _rb.AddForce(-transform.up * gravity);
-        if (_rb.velocity.y != 0)
-            _rb.AddForce(-transform.up * fallStrength);
+        rb.AddForce(-transform.up * gravity, ForceMode.Acceleration);
     }
 
     #endregion
@@ -180,7 +224,7 @@ public class ThunderControls : MonoBehaviour
     //this function will use the moveVector from the Speed region 
     public void Dash(InputAction.CallbackContext context)
     {
-        if (_isHoldingShotLock) return;
+        if (isHoldingShotLock) return;
         if (context.started)
         {
             if (Physics.Raycast(transform.position, -transform.up, 1.1f))
@@ -190,7 +234,7 @@ public class ThunderControls : MonoBehaviour
             dashed = true;
             //uses same logic as in Speed region to move person
             Vector3 relativeDash = lastInput * dashSpeed;
-            _rb.velocity = relativeDash;
+            rb.velocity = relativeDash;
 
             //dash adds speed to current speed
             currentSpeed += maxSpeed * 0.8f;
@@ -216,7 +260,7 @@ public class ThunderControls : MonoBehaviour
     [SerializeField] private new CinemachineVirtualCamera camera;
     [SerializeField] private float cameraZoomSpeed;
 
-    private bool _isHoldingShotLock;
+    private bool isHoldingShotLock;
 
     public void ShotLockInput(InputAction.CallbackContext context)
     {
@@ -229,20 +273,20 @@ public class ThunderControls : MonoBehaviour
 
         if (context.performed)
         {
-            _isHoldingShotLock = true;
+            isHoldingShotLock = true;
             StartCoroutine(LerpActionShotLockInput(30f, new Vector3(2, 2, 0), 0f));
         }
 
         if (context.canceled)
         {
-            _isHoldingShotLock = false;
+            isHoldingShotLock = false;
             StartCoroutine(LerpActionShotLockInput(60f, new Vector3(0, 0, 0), 2.5f));
         }
     }
 
     private IEnumerator LerpActionShotLockInput(float newFOV, Vector3 newOffset, float newVal)
     {
-        bool firstState = _isHoldingShotLock;
+        bool firstState = isHoldingShotLock;
         float lerpTimer = 0f;
         while (lerpTimer < cameraZoomSpeed)
         {
@@ -250,7 +294,7 @@ public class ThunderControls : MonoBehaviour
             var lerpFloat = Mathf.Lerp(fov, newFOV, lerpTimer);
             camera.m_Lens.FieldOfView = lerpFloat;
 
-            if (!firstState.Equals(_isHoldingShotLock)) yield break;
+            if (!firstState.Equals(isHoldingShotLock)) yield break;
 
             var cine3RdPerson = camera.GetCinemachineComponent<Cinemachine3rdPersonFollow>();
 
@@ -274,13 +318,15 @@ public class ThunderControls : MonoBehaviour
 
     #region Position and Rotation
 
-    private bool _isOnCurvedGround;
+    private bool isOnCurvedGround;
+
+    private Vector3 wallNormal;
 
     public void OnCollisionStay(Collision collisionInfo)
     {
         if (collisionInfo.gameObject.CompareTag("CurvedGround"))
         {
-            _isOnCurvedGround = true;
+            isOnCurvedGround = true;
             var transform1 = transform;
             Ray ray = new Ray(transform1.position, -transform1.up);
             if (Physics.Raycast(ray, out var hit, ground))
@@ -293,12 +339,29 @@ public class ThunderControls : MonoBehaviour
         }
         else if (collisionInfo.gameObject.CompareTag("Ground"))
         {
-            _isOnCurvedGround = false;
+            isOnCurvedGround = false;
             var transform1 = transform;
             var reference = Quaternion.Lerp(transform1.rotation, Quaternion.Euler(0, 0, 0),
                 animCurve.Evaluate(timer));
             transform.localRotation = Quaternion.Euler(reference.eulerAngles.x, reference.eulerAngles.y,
                 reference.eulerAngles.z);
+        }
+        else if (collisionInfo.gameObject.CompareTag("Wall"))
+        {
+            doublejumped = false;
+            againstWall = true;
+            wallNormal = Vector3.zero;
+            isOnCurvedGround = false;
+            var transform1 = transform;
+            var reference = Quaternion.Lerp(transform1.rotation, Quaternion.Euler(0, 0, 0),
+                animCurve.Evaluate(timer));
+            transform.localRotation = Quaternion.Euler(reference.eulerAngles.x, reference.eulerAngles.y,
+                reference.eulerAngles.z);
+            rb.velocity += Vector3.down * Time.fixedDeltaTime;
+            foreach (var contact in collisionInfo.contacts)
+            {
+                wallNormal += contact.normal;
+            }
         }
     }
 
@@ -306,19 +369,23 @@ public class ThunderControls : MonoBehaviour
     {
         if (other.gameObject.CompareTag("CurvedGround"))
         {
-            _isOnCurvedGround = false;
+            isOnCurvedGround = false;
             StartCoroutine(ReturnRotation());
+        }
+        else if (other.gameObject.CompareTag("Wall"))
+        {
+            againstWall = false;
         }
     }
 
     private IEnumerator ReturnRotation()
     {
-        yield return new WaitForSeconds(2f);
+        yield return new WaitForSeconds(0.3f);
 
         while (!transform.rotation.Equals(Quaternion.Euler(0, 0, 0)))
         {
-            if (_isOnCurvedGround) yield break;
-                var transform1 = transform;
+            if (isOnCurvedGround) yield break;
+            var transform1 = transform;
             var reference = Quaternion.Lerp(transform1.rotation, Quaternion.Euler(0, 0, 0),
                 animCurve.Evaluate(timer));
             transform.localRotation = Quaternion.Euler(reference.eulerAngles.x, reference.eulerAngles.y,
